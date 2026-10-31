@@ -214,6 +214,36 @@ Adding an optimised variant for a particular platform does not require changing 
     - Custom node types added by other mods, such as Lithostitched or the mod version of Tectonic, remain opaque nodes until suitable handlers are available.
     - Mods that modify biome-placement inputs, such as Biolith or TerraBlender, change the inputs to the evaluation rather than the evaluation itself. They are therefore covered by the live-oracle principle.
 
+### 3.8 Native code in other languages
+
+The engine's contract is not the C language itself, but a binary interface (an application
+binary interface, or ABI: the exact set of functions and data layouts both sides agree on),
+defined once in a C header file (a file that declares function signatures without implementing
+them). C is only the first implementation of that interface. The interface uses only primitive
+types (pointers to arrays, lengths and numbers) and the C calling convention (the universal
+agreement on how functions receive their arguments), so any language that can produce machine
+code behind such functions can implement part of the library - Rust, C++, Zig, or assembly
+language itself.
+
+- Mixing languages inside one library is a standard linking step: each language is compiled
+  into object files (chunks of machine code with named functions), and the linker (the tool
+  that assembles object files into a finished library) joins them into a single DLL or SO. The
+  main part of the engine can be written in C while one kernel variant is implemented in Rust
+  and another in hand-written assembly; for the game and for Java it remains one library with
+  one interface.
+- Other languages enter at the finest granularity: as kernel variants (Section 3.6). The
+  selection machinery neither knows nor cares which language produced a variant - it tests the
+  machine code for bit-exactness and speed, so a variant written in any language is adopted
+  only where it is provably equal and faster.
+- Rules that keep the boundary safe: no exceptions, panics (a fatal error in Rust terminology)
+  or memory allocation may cross the interface; languages that carry heavy runtimes of their
+  own (their own thread schedulers or garbage collectors) do not belong inside kernels; all
+  exported names carry the project prefix; and the library reports its ABI version when it is
+  loaded, which Java checks.
+- The source tree mirrors this design: `libs_src/C` holds the C implementation today, and
+  `libs_src/<language>` folders can be added next to it, each with its own build script producing
+  object files for the shared link step.
+
 ## 4. The density program (approximate)
 
 - The program uses compact stack-machine bytecode (a short list of simple instructions executed by the engine).
@@ -648,6 +678,34 @@ ARM64 и x86-64 охватывают множество поколений пр�
     - Второй компилятор деревьев функций плотности, например компилятор из C2ME, не должен конфликтовать с этим модом. Система обнаруживает его присутствие, а специальная настройка определяет, какой компилятор будет отвечать за вычисление деревьев.
     - Собственные типы узлов, добавленные другими модами, например Lithostitched или модифицированной версией Tectonic, остаются непрозрачными узлами до тех пор, пока для них не появятся соответствующие обработчики.
     - Моды, изменяющие входные данные для размещения биомов, например Biolith или TerraBlender, меняют исходные данные вычислений, а не сами вычисления. Поэтому они совместимы с принципом использования реального Java-кода в качестве эталона.
+
+### 3.8 Нативный код на других языках
+
+Контракт движка - не сам язык C, а бинарный интерфейс (прикладной бинарный интерфейс, или ABI:
+точный набор функций и форматов данных, о которых договорились обе стороны), определённый один
+раз в заголовочном файле C (файле, который объявляет сигнатуры функций, не реализуя их). C -
+лишь первая реализация этого интерфейса. Интерфейс использует только примитивные типы (указатели
+на массивы, длины и числа) и соглашение о вызовах C (универсальную договорённость о том, как
+функции получают свои аргументы), поэтому любую часть библиотеки может реализовать любой язык,
+способный производить машинный код за такими функциями: Rust, C++, Zig или сам ассемблер.
+
+- Смешение языков внутри одной библиотеки - стандартный шаг линковки: каждый язык компилируется
+  в объектные файлы (куски машинного кода с именованными функциями), а линкер (инструмент,
+  собирающий объектные файлы в готовую библиотеку) соединяет их в один DLL или SO. Основная
+  часть движка может быть написана на C, один вариант ядра - на Rust, а другой - на ассемблере
+  вручную; для игры и для Java это остаётся одна библиотека с одним интерфейсом.
+- Другие языки входят с самой мелкой гранулярностью: как варианты ядер (раздел 3.6). Механизму
+  подбора всё равно, какой язык произвёл вариант, - он тестирует машинный код на побитовую
+  точность и скорость, поэтому вариант на любом языке принимается только там, где он доказуемо
+  равен и быстрее.
+- Правила, которые держат границу безопасной: через интерфейс не должны проходить исключения,
+  паники (фатальные ошибки в терминологии Rust) и выделение памяти; языки с тяжёлыми
+  собственными средами выполнения (своими планировщиками потоков или сборщиками мусора) не
+  должны находиться внутри ядер; все экспортируемые имена несут префикс проекта; а библиотека
+  при загрузке сообщает свою версию ABI, которую Java проверяет.
+- Устройство исходников повторяет этот дизайн: в `libs_src/C` сегодня лежит реализация на C, а
+  рядом могут добавляться папки `libs_src/<язык>`, каждая со своим сборочным скриптом, производящим
+  объектные файлы для общего шага линковки.
 
 ## 4. Программа плотности (приблизительная структура)
 
