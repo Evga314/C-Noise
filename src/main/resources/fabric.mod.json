@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "cnoise",
+  "version": "${version}",
+  "name": "C Noise",
+  "description": "Mod which optimize and improves vanilla noise generation, using native C code",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/cnoise/icon.png",
+  "environment": "server",
+  "entrypoints": {
+    "fabric-datagen": [
+      "com.Evga314.cnoise.client.CnoiseDataGenerator"
+    ],
+    "main": [
+      "com.Evga314.cnoise.Cnoise"
+    ]
+  },
+  "mixins": [
+    "cnoise.mixins.json",
+    {
+      "config": "cnoise.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
