@@ -119,7 +119,7 @@ The following checks run for each tree whenever a world is entered. They run in 
 
    The same chunks are then generated through the native engine. Their hashes are compared. The native path is enabled for that tree in that world only if the hashes match.
 
-3. **Probation:** The first batches after the native path is enabled are checked synchronously: every result is compared with Java before the generator may use it, so an unverified result never reaches the world. Later batches are shadow-checked in the background. If any difference is detected, the tree is disabled for the rest of the session.
+3. **Probation:** The first batches after the native path is enabled are checked synchronously: every result is compared with Java before the generator may use it, so an unverified result never reaches the world. Later batches may be checked in the background only for nodes and subtrees whose existing IR descriptors explicitly establish that independent reevaluation is safe. Eligibility must be derived from the existing semantic properties (`purity`, `stateBehavior`, `sideEffectBehavior`, `cacheSemantics`, `contextRequirements` and `evaluationConstraints`), not from an assumption that an unclassified node is pure. Background Shadow Evaluation is prohibited for nodes with mutable state, observable side effects, call-order dependence or a dependency on a live mutable context such as `NoiseChunk` or its caches. Missing or unknown properties fail closed: retain synchronous verification in the original context, or keep the node on the Java path if a safe independent context cannot be established. For eligible pure nodes, shadow evaluation must preserve cache and context semantics and must not mutate generation state. Any raw-bit mismatch disables the tree for the rest of the session.
 
 4. **Failure localisation:** If the golden test fails, the system tests smaller subtrees by repeatedly dividing the tree into smaller parts. This helps identify the exact part that produces incorrect results.
 
@@ -567,9 +567,9 @@ Its performance logs showed how much processing power vanilla noise generation a
 
 3. **Испытательный срок.** Первые пакетные вычисления после включения нативного пути проверяются синхронно: каждый результат сравнивается с Java до того, как генератор сможет его использовать, поэтому непроверенный результат никогда не попадает в мир.
 
-   Последующие пакеты проверяются теневой проверкой: вычисления повторяются в фоне и сравниваются с результатами Java.
+   Последующие пакеты могут проверяться в фоне только для узлов и поддеревьев, для которых существующие характеристики IR явно подтверждают безопасность независимого повторного вычисления. Допуск определяется существующими семантическими характеристиками (`purity`, `stateBehavior`, `sideEffectBehavior`, `cacheSemantics`, `contextRequirements` и `evaluationConstraints`); отсутствие классификации нельзя трактовать как чистоту. Фоновая теневая проверка запрещена для узлов с изменяемым состоянием, наблюдаемыми побочными эффектами, зависимостью от порядка вызовов или привязкой к живому изменяемому контексту, включая `NoiseChunk` и его кэши. Неизвестные или отсутствующие характеристики трактуются консервативно: сохраняется синхронная проверка в исходном контексте, а если безопасный независимый контекст обеспечить нельзя, узел остаётся на Java-пути. Для допущенных чистых узлов теневая проверка обязана сохранять семантику кэшей и контекста и не должна изменять состояние генерации.
 
-   Если обнаруживается расхождение, дерево отключается до конца текущей сессии.
+   При любом побитовом несовпадении дерево отключается до конца текущей сессии.
 
 4. **Локализация отказа.** Если проверка золотых чанков не пройдена, система начинает проверять меньшие поддеревья, последовательно разделяя исходное дерево на части.
 
