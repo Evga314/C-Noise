@@ -19,3 +19,6 @@ hs_err_pid*
 
 # Common working directory
 run
+
+#temporary scripts for changing files in IDE
+IDEscripts
