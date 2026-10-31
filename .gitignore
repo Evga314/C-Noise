@@ -22,3 +22,9 @@ run
 
 #temporary scripts for changing files in IDE
 IDEscripts
+
+#Agent session backup. Later I can open it if somebody ask, to make your AI agent life easier :) And also to save your tokens, because your AI agent will skip some parts of analysis
+/AGENT_SESSION/
+
+#minecraft logs
+/logs/

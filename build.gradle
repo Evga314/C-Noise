@@ -85,6 +85,80 @@ jar {
     }
 }
 
+// Keep Minecraft differential tests separate from production and standalone FFM tests.
+sourceSets {
+    perlinTest {
+        java {
+            srcDir 'tests/integration'
+            include 'PerlinMinecraftTest.java'
+            include 'BlendedMinecraftTest.java'
+        }
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath
+    }
+}
+
+def perlinJvmModes = [
+        interpreted: ['-Xint'],
+        default: [],
+        c2: ['-Xbatch', '-XX:-TieredCompilation']
+]
+def perlinVerification = tasks.register('verifyPerlin') {
+    group = 'verification'
+    description = 'Compare native Perlin with Minecraft in three JVM modes.'
+}
+perlinJvmModes.each { mode, vmOptions ->
+    def verificationTask = tasks.register("verifyPerlin_${mode}", JavaExec) {
+        group = 'verification'
+        dependsOn tasks.named('perlinTestClasses')
+        classpath = sourceSets.perlinTest.runtimeClasspath
+        mainClass = 'PerlinMinecraftTest'
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+        }
+        jvmArgs(['--enable-native-access=ALL-UNNAMED'] + vmOptions)
+        doFirst {
+            def libraryPath = providers.gradleProperty('perlinTestLibrary').orNull
+            if (libraryPath == null || !file(libraryPath).isFile()) {
+                throw new GradleException(
+                        'Build cnoise_perlin_test_bridge first and pass -PperlinTestLibrary=<library path>')
+            }
+            setArgs([file(libraryPath).absolutePath])
+        }
+    }
+    perlinVerification.configure {
+        dependsOn verificationTask
+    }
+}
+
+def blendedVerification = tasks.register('verifyBlended') {
+    group = 'verification'
+    description = 'Compare native SmearedPerlin and BlendedNoise with Minecraft in three JVM modes.'
+}
+perlinJvmModes.each { mode, vmOptions ->
+    def verificationTask = tasks.register("verifyBlended_${mode}", JavaExec) {
+        group = 'verification'
+        dependsOn tasks.named('perlinTestClasses')
+        classpath = sourceSets.perlinTest.runtimeClasspath
+        mainClass = 'BlendedMinecraftTest'
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+        }
+        jvmArgs(['--enable-native-access=ALL-UNNAMED'] + vmOptions)
+        doFirst {
+            def libraryPath = providers.gradleProperty('perlinTestLibrary').orNull
+            if (libraryPath == null || !file(libraryPath).isFile()) {
+                throw new GradleException(
+                        'Build cnoise_perlin_test_bridge first and pass -PperlinTestLibrary=<library path>')
+            }
+            setArgs([file(libraryPath).absolutePath])
+        }
+    }
+    blendedVerification.configure {
+        dependsOn verificationTask
+    }
+}
+
 // configure the maven publication
 publishing {
     publications {
