@@ -4,6 +4,8 @@ This document explains how a server-side Minecraft mod accelerates world generat
 
 This is a design document. The mod is still under development, so some parts of the design may change during implementation. Terms that may be unfamiliar to players are explained in parentheses when they first appear.
 
+A companion document, `DETAILED_ARCHITECTURE_PLAN.md`, expands this architecture into a detailed implementation plan with full specifications and checklists.
+
 The document contains two parts: the English version first, followed by the same text in Russian.
 
 ---
@@ -34,7 +36,7 @@ The first versions cover noise filling during vanilla chunk generation in every 
 
 4. **Batch evaluation only.** Every native call processes arrays of points, never a single point. Switching between Java and native code has a fixed overhead. Paying that cost for every point would eliminate the performance gain.
 
-5. **No crashes by construction.** The native side uses fixed code. It does not allocate memory, perform input or output operations, or start its own threads. It works with fixed-size buffers (preallocated memory areas with predetermined sizes), which Java validates before making a call. If anything fails, the affected branch falls back to Java. Such a failure cannot crash the game process.
+5. **Crash risk minimised by construction.** The native side uses fixed code. It does not allocate memory, perform input or output operations, or start its own threads. It works with fixed-size buffers (preallocated memory areas with predetermined sizes), which Java validates before making a call. If anything fails, the affected branch falls back to Java. This discipline minimises the risk but cannot eliminate it entirely: a fault inside machine code (for example, an invalid memory access) can terminate the process before Java can react, so the engine is kept minimal and is tested in isolation.
 
 6. **Open for contributions.** Supporting a new node or sampler type (a component that generates or processes noise values) requires one small handler module (a piece of code that teaches the compiler how to process a particular formula element) and successful verification. The core engine does not need compatibility changes.
 
@@ -60,9 +62,9 @@ The first versions cover noise filling during vanilla chunk generation in every 
 
   The engine communicates back with Java only through the batched callback mechanism described in Section 4.
 
-- The Java-to-C bridges use FFM (the modern Foreign Function and Memory API introduced in Java 22 and later) as the primary approach. JNI (the classic Java Native Interface, available in every Java version) serves as the universal fallback. This is useful, for example, with phone launchers that use Java versions without FFM support.
+- The Java-to-C bridge uses FFM only (the Foreign Function and Memory API, a standard part of Java 22 and later). JNI (the classic Java Native Interface) is not used: the project targets current Minecraft versions, which themselves require a modern Java, so Java versions below 22 are not supported. One bridge also means one behaviour to test on every platform, including phone launchers.
 
-  The C functions are identical for both approaches. Only the Java wrapper is different.
+  If FFM is unavailable in the Java runtime that runs the game, the accelerator stays disabled and generation proceeds in pure Java.
 
 ### 3.2 Java-side compiler
 
@@ -76,9 +78,13 @@ The first versions cover noise filling during vanilla chunk generation in every 
     - Dead-branch removal (removing parts of a formula whose results are never used).
     - Hoisting of column-constant subtrees (moving calculations that depend only on the X/Z column out of repeated operations, so they are performed once per column).
 
+- The optimisation passes are constrained by the semantic properties that each handler declares for its node type: whether a result can safely be reused, which coordinates it depends on, and the scope of its caches (the regions in which cached values stay valid). A pass may only transform a subtree when the declared properties allow it. Nodes whose properties are not declared are compiled without optimisation.
+
 - **Program verifier:** Before a program runs for the first time, Java checks every command and its operands. It verifies that table indices are within valid ranges, stack depth is limited and callback indices are valid.
 
   This serves the same purpose as bytecode verification (checking compiled instructions before execution) performed by the Java virtual machine on classes. A program that fails verification never reaches the native engine.
+
+- The verifier also enforces resource limits: maximum program size, table sizes, tree depth and callback counts. A pathological tree built by a datapack or another mod therefore cannot produce an unbounded program or exhaust memory.
 
 - Programs are cached by tree signature (a hash, or short fingerprint, of the tree structure and handler versions).
 
@@ -92,7 +98,7 @@ The first versions cover noise filling during vanilla chunk generation in every 
 
   Most of the tree can still run natively. Only the unsupported part is evaluated in Java.
 
-- Handlers are registered through a loader entrypoint (a standard registration point that the mod loader calls during startup). This allows another mod to provide support for its own node types through a small companion module.
+- Handlers are registered through the integration interface described in Section 3.9, which each loader adapter exposes at startup. This allows another mod to provide support for its own node types through a small companion module.
 
   This is the intended pull-request surface (the part of the project where external developers can contribute their own implementations).
 
@@ -113,7 +119,7 @@ The following checks run for each tree whenever a world is entered. They run in 
 
    The same chunks are then generated through the native engine. Their hashes are compared. The native path is enabled for that tree in that world only if the hashes match.
 
-3. **Probation:** During the first batches after the native path is enabled, the results are shadow-checked (calculated again in the background and compared with Java). If any difference is detected, the tree is disabled for the rest of the session.
+3. **Probation:** The first batches after the native path is enabled are checked synchronously: every result is compared with Java before the generator may use it, so an unverified result never reaches the world. Later batches are shadow-checked in the background. If any difference is detected, the tree is disabled for the rest of the session.
 
 4. **Failure localisation:** If the golden test fails, the system tests smaller subtrees by repeatedly dividing the tree into smaller parts. This helps identify the exact part that produces incorrect results.
 
@@ -138,7 +144,7 @@ The following checks run for each tree whenever a world is entered. They run in 
     - Foreign world generator detected.
     - Another compiler is already present.
 
-  The report also contains the tree signature, platform, handler versions and the kernel-selection table from Section 3.6. It provides developers with all the relevant information in one file.
+  The report also contains the tree signature, platform, handler versions and the kernel-selection table from Section 3.6. It provides developers with all the relevant information in one file. The report does not contain the world seed or personal data.
 
 - The mod also sends a short message to the in-game chat in single-player. On a server, it sends the message to the server console.
 
@@ -243,6 +249,26 @@ language itself.
 - The source tree mirrors this design: `libs_src/C` holds the C implementation today, and
   `libs_src/<language>` folders can be added next to it, each with its own build script producing
   object files for the shared link step.
+
+### 3.9 Loader support
+
+The accelerator is built as a loader-independent core plus a thin adapter for each supported
+mod loader (the program that loads mods into the game).
+
+- The core contains the compiler, the handler registry, verification, reporting, the FFM
+  bridge and the native libraries. It depends only on the game's own classes and the standard
+  Java library. It never imports the API of any loader - not even for handler registration,
+  which goes through an internal integration interface that the adapters implement.
+- An adapter has three duties: start the core when the game starts, connect the core to the
+  noise-filling stage of chunk generation, and provide the configuration. The hook itself
+  targets vanilla game classes, which are the same under every loader, so the integration
+  code is shared.
+- Supported loaders: Fabric, Quilt and NeoForge. Forge is not supported: it differs from the
+  other loaders in its fundamental design, not only in details, and would require a separate
+  integration rather than an adapter of the same kind.
+- The native libraries do not depend on the loader at all (Section 3.8): the same binaries
+  ship in every loader's build. A build for one loader packages the core, the native
+  libraries and that loader's adapter.
 
 ## 4. The density program (approximate)
 
@@ -414,11 +440,11 @@ Its performance logs showed how much processing power vanilla noise generation a
 
    Переход между Java и нативным кодом всегда имеет фиксированные накладные расходы. Если выполнять такой переход для каждой точки отдельно, весь выигрыш в производительности исчезнет.
 
-5. **Никаких крашей по построению.** Нативная сторона использует фиксированный код. Она не выделяет память, не выполняет операции ввода и вывода и не запускает собственных потоков.
+5. **Риск крашей сведён к минимуму по построению.** Нативная сторона использует фиксированный код. Она не выделяет память, не выполняет операции ввода и вывода и не запускает собственных потоков.
 
    Вместо этого она работает с буферами фиксированного размера (заранее выделенными областями памяти с определёнными размерами). Java проверяет размеры этих буферов до вызова.
 
-   При любом сбое соответствующая ветка переключается на Java. Такой сбой не может привести к аварийному завершению игры.
+   При любом сбое соответствующая ветка переключается на Java. Эта дисциплина сводит риск к минимуму, но не устраняет его полностью: ошибка внутри машинного кода (например, обращение к недопустимой памяти) может завершить процесс до того, как Java успеет отреагировать, поэтому движок делается минимальным и тестируется изолированно.
 
 6. **Открытость для вкладов.** Для поддержки нового типа узла или сэмплера (компонента, который создаёт или обрабатывает значения шума) требуется небольшой модуль обработчика (часть кода, которая объясняет компилятору, как работать с определённым элементом формулы) и успешное прохождение верификации.
 
@@ -460,13 +486,11 @@ Its performance logs showed how much processing power vanilla noise generation a
 
   Обратно в Java движок обращается только через пакетный механизм обратных вызовов, описанный в разделе 4.
 
-- Для связи Java и C используются два механизма:
-    - FFM (современный интерфейс внешних функций и памяти, Foreign Function and Memory API, появившийся в Java 22 и более новых версиях) — основной способ взаимодействия.
-    - JNI (классический Java Native Interface, доступный во всех версиях Java) — универсальный запасной вариант.
+- Для связи Java и C используется только FFM (интерфейс внешних функций и памяти, Foreign Function and Memory API, стандартная часть Java 22 и более новых версий).
 
-  JNI особенно полезен для телефонных лаунчеров, в которых используется версия Java без поддержки FFM.
+  JNI (классический Java Native Interface) не используется: проект ориентирован на актуальные версии Minecraft, которые сами требуют современную Java, поэтому версии Java ниже 22 не поддерживаются. Один мост означает и одно поведение, которое нужно тестировать на каждой платформе, включая телефонные лаунчеры.
 
-  Функции на C в обоих случаях одинаковы. Отличается только Java-обёртка.
+  Если FFM недоступен в среде Java, в которой запущена игра, ускоритель остаётся отключённым, а генерация выполняется полностью на Java.
 
 ### 3.2 Компилятор на стороне Java
 
@@ -482,6 +506,8 @@ Its performance logs showed how much processing power vanilla noise generation a
     - Удаление мёртвых ветвей (удаление частей формулы, результаты которых нигде не используются).
     - Поднятие поддеревьев, постоянных по колонке (перенос вычислений, зависящих только от колонки X/Z, за пределы повторяющихся операций, чтобы выполнять их один раз на колонку).
 
+- Этапы оптимизации ограничены семантическими свойствами, которые каждый обработчик объявляет для своего типа узла: можно ли безопасно переиспользовать результат, от каких координат он зависит и какова область действия его кешей (области, в которых кешированные значения остаются действительными). Этап вправе преобразовывать поддерево только тогда, когда объявленные свойства это разрешают. Узлы, чьи свойства не объявлены, компилируются без оптимизации.
+
 - **Верификатор программ:** Перед первым запуском программы Java проверяет каждую команду и её операнды.
 
   Проверяется, что индексы таблиц находятся в допустимых пределах, глубина стека ограничена, а индексы обратных вызовов корректны.
@@ -489,6 +515,8 @@ Its performance logs showed how much processing power vanilla noise generation a
   Это выполняет ту же задачу, что и верификация байткода (проверка скомпилированных инструкций перед выполнением), которую виртуальная машина Java проводит для классов.
 
   Программа, не прошедшая проверку, до нативного движка не доходит.
+
+- Верификатор также налагает ограничения на ресурсы: максимальный размер программы, размеры таблиц, глубину дерева и количество обратных вызовов. Поэтому патологическое дерево, созданное датапаком или другим модом, не может породить неограниченную программу или исчерпать память.
 
 - Программы кэшируются по подписи дерева (хэшу, то есть короткому отпечатку структуры дерева и версий обработчиков).
 
@@ -508,7 +536,7 @@ Its performance logs showed how much processing power vanilla noise generation a
 
   Большая часть дерева при этом всё равно может выполняться нативно. На Java переводится только неподдерживаемая часть.
 
-- Регистрация обработчиков происходит через точку входа загрузчика (стандартное место регистрации, которое загрузчик модов вызывает при запуске).
+- Регистрация обработчиков происходит через интерфейс интеграции, описанный в разделе 3.9, который каждый адаптер загрузчика предоставляет при запуске.
 
   Благодаря этому другой мод может добавить поддержку собственных типов узлов с помощью небольшого дополнительного модуля.
 
@@ -537,9 +565,9 @@ Its performance logs showed how much processing power vanilla noise generation a
 
    Нативный путь для данного дерева в этом мире включается только в случае полного совпадения хэшей.
 
-3. **Испытательный срок.** Для первых пакетных вычислений после включения нативного пути результаты дополнительно проверяются в фоновом режиме.
+3. **Испытательный срок.** Первые пакетные вычисления после включения нативного пути проверяются синхронно: каждый результат сравнивается с Java до того, как генератор сможет его использовать, поэтому непроверенный результат никогда не попадает в мир.
 
-   Это называется теневой проверкой: вычисления повторяются в фоне и сравниваются с результатами Java.
+   Последующие пакеты проверяются теневой проверкой: вычисления повторяются в фоне и сравниваются с результатами Java.
 
    Если обнаруживается расхождение, дерево отключается до конца текущей сессии.
 
@@ -570,7 +598,7 @@ Its performance logs showed how much processing power vanilla noise generation a
     - Обнаружен сторонний генератор мира.
     - Уже присутствует другой компилятор.
 
-  Кроме того, отчёт содержит подпись дерева, платформу, версии обработчиков и таблицу подбора ядер из раздела 3.6.
+  Кроме того, отчёт содержит подпись дерева, платформу, версии обработчиков и таблицу подбора ядер из раздела 3.6. Сид мира и личные данные в отчёт не включаются.
 
   Таким образом, разработчики получают всю необходимую информацию в одном файле.
 
@@ -706,6 +734,27 @@ ARM64 и x86-64 охватывают множество поколений пр�
 - Устройство исходников повторяет этот дизайн: в `libs_src/C` сегодня лежит реализация на C, а
   рядом могут добавляться папки `libs_src/<язык>`, каждая со своим сборочным скриптом, производящим
   объектные файлы для общего шага линковки.
+
+### 3.9 Поддержка загрузчиков
+
+Ускоритель строится как независимое от загрузчика ядро плюс тонкий адаптер под каждый
+поддерживаемый загрузчик модов (программу, которая загружает моды в игру).
+
+- Ядро содержит компилятор, реестр обработчиков, верификацию, отчётность, мост FFM и
+  нативные библиотеки. Оно зависит только от классов самой игры и стандартной библиотеки
+  Java. Оно никогда не импортирует API какого-либо загрузчика - даже для регистрации
+  обработчиков, которая проходит через внутренний интерфейс интеграции, реализуемый
+  адаптерами.
+- У адаптера три обязанности: запустить ядро при старте игры, подключить ядро к стадии
+  шумового заполнения генерации чанков и предоставить конфигурацию. Сам хук ставится в
+  ванильные классы игры, которые одинаковы под всеми загрузчиками, поэтому код интеграции
+  общий.
+- Поддерживаемые загрузчики: Fabric, Quilt и NeoForge. Forge не поддерживается: он
+  отличается от остальных загрузчиков принципиальным устройством, а не только деталями, и
+  потребовал бы отдельной интеграции, а не адаптера того же вида.
+- Нативные библиотеки от загрузчика не зависят вообще (раздел 3.8): одни и те же бинарники
+  поставляются в сборке под каждый загрузчик. Сборка под конкретный загрузчик упаковывает
+  ядро, нативные библиотеки и адаптер этого загрузчика.
 
 ## 4. Программа плотности (приблизительная структура)
 
