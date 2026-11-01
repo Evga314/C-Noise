@@ -85,16 +85,44 @@ jar {
     }
 }
 
-// Keep Minecraft differential tests separate from production and standalone FFM tests.
+// Keep Minecraft differential tests and the standalone benchmark separate from production.
+// Разделяем Minecraft differential tests и standalone benchmark с production-кодом.
 sourceSets {
     perlinTest {
         java {
             srcDir 'tests/integration'
+            srcDir 'benchmarks/interpreter'
             include 'PerlinMinecraftTest.java'
             include 'BlendedMinecraftTest.java'
+            include 'ThreeWayBenchmark.java'
         }
-        compileClasspath += sourceSets.main.compileClasspath
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
         runtimeClasspath += sourceSets.main.runtimeClasspath
+    }
+}
+
+tasks.register('cnoiseBenchmark', JavaExec) {
+    group = 'verification'
+    description = 'Run the three-way Perlin and arithmetic benchmark / Запустить трёхсторонний benchmark Perlin и arithmetic.'
+    dependsOn tasks.named('perlinTestClasses')
+    classpath = sourceSets.perlinTest.runtimeClasspath
+    mainClass = 'ThreeWayBenchmark'
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    jvmArgs(['--enable-native-access=ALL-UNNAMED', '-Xms2g', '-Xmx2g'])
+    doFirst {
+        def perlinLibraryPath = providers.gradleProperty('perlinTestLibrary').orNull
+        def arithmeticLibraryPath = providers.gradleProperty('arithmeticLibrary').orNull
+        if (perlinLibraryPath == null || !file(perlinLibraryPath).isFile()) {
+            throw new GradleException(
+                    'Pass -PperlinTestLibrary=<absolute path to cnoise_perlin_test_bridge DLL>')
+        }
+        if (arithmeticLibraryPath == null || !file(arithmeticLibraryPath).isFile()) {
+            throw new GradleException(
+                    'Pass -ParithmeticLibrary=<absolute path to cnoise DLL>')
+        }
+        setArgs([file(perlinLibraryPath).absolutePath, file(arithmeticLibraryPath).absolutePath])
     }
 }
 
