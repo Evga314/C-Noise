@@ -26,5 +26,9 @@ IDEscripts
 #Agent session backup. Later I can open it if somebody ask, to make your AI agent life easier :) And also to save your tokens, because your AI agent will skip some parts of analysis
 /AGENT_SESSION/
 
+# Keep shared project knowledge eligible for version control.
+# Общая памятка проекта должна быть доступна для добавления в Git.
+!/AGENTS.md
+
 #minecraft logs
 /logs/

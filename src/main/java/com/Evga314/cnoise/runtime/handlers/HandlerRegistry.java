@@ -54,8 +54,13 @@ public final class HandlerRegistry {
     public synchronized void register(DensityNodeHandler<?> handler) {
         requireMutable();
         Objects.requireNonNull(handler, "handler");
+        registerTyped(handler);
+    }
 
-        Class<?> nodeType = Objects.requireNonNull(handler.nodeType(), "handler.nodeType()");
+    // Capture the handler and its node class under the same type parameter.
+    // Сохраняем связь обработчика и класса узла через общий параметр типа.
+    private <T> void registerTyped(DensityNodeHandler<T> handler) {
+        Class<T> nodeType = Objects.requireNonNull(handler.nodeType(), "handler.nodeType()");
         if (nodeType.isPrimitive() || nodeType.isArray()) {
             throw new IllegalArgumentException(
                     "Handler node type must be a non-array reference type: " + nodeType.getName());
@@ -120,7 +125,7 @@ public final class HandlerRegistry {
     public synchronized List<DensityNodeHandler<?>> handlers() {
         return handlersById.values().stream()
                 .sorted(Comparator.comparing(entry -> entry.version().id()))
-                .map(entry -> (DensityNodeHandler<?>) entry.handler())
+                .<DensityNodeHandler<?>>map(entry -> entry.handler())
                 .toList();
     }
 

@@ -68,6 +68,20 @@ if(NOT WIN32)
 endif()
 
 if(BUILD_TESTING)
+    # Experimental direct arithmetic; keep it outside the production ABI.
+    # Экспериментальная прямая арифметика вне производственного ABI.
+    add_library(cnoise_direct_benchmark SHARED
+        tests/direct_arithmetic_benchmark.c
+    )
+    set_target_properties(cnoise_direct_benchmark PROPERTIES
+        C_VISIBILITY_PRESET hidden
+        WINDOWS_EXPORT_ALL_SYMBOLS FALSE
+    )
+    cnoise_strict_compilation(cnoise_direct_benchmark)
+    if(NOT WIN32)
+        target_link_libraries(cnoise_direct_benchmark PRIVATE m)
+    endif()
+
     add_library(cnoise_perlin_test_bridge SHARED
         tests/perlin_test_bridge.c
         src/kernels/perlin.c

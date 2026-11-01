@@ -1,4 +1,6 @@
-<escape>import com.Evga314.cnoise.runtime.bridge.NativeArithmeticBridge;
+package com.Evga314.cnoise.runtime.benchmark;
+
+import com.Evga314.cnoise.runtime.bridge.NativeArithmeticBridge;
 import com.Evga314.cnoise.runtime.bytecode.ArithmeticProgram;
 import com.Evga314.cnoise.runtime.bytecode.ArithmeticProgram.Instruction;
 import com.Evga314.cnoise.runtime.bytecode.ArithmeticProgram.Opcode;
@@ -38,10 +40,14 @@ import static com.Evga314.cnoise.runtime.bytecode.ArithmeticProgram.Opcode.*;
 
  /**
   * Standalone three-way benchmark for Perlin and arithmetic batch evaluation.
+  * Автономный benchmark Perlin и трёх вариантов пакетной арифметики.
   *
   * W1 compares Minecraft Java Perlin with scalar native FFM calls.
+  * W1 сравнивает Minecraft Java Perlin со скалярными нативными FFM-вызовами.
   * W2 compares a recursive object tree, explicit Java batch arithmetic,
   * and the existing native ArithmeticProgram batch bridge.
+  * W2 сравнивает рекурсивное дерево объектов, прямой пакетный Java-цикл
+  * и существующий нативный пакетный мост ArithmeticProgram.
   *
   * All correctness gates run before any performance measurements.
   * Все проверки корректности выполняются до начала измерений.
@@ -171,6 +177,7 @@ public final class ThreeWayBenchmark {
             report.append("|---|---:|---|\n");
 
             // Gate every W1 size before starting any measurements.
+            // Проверяем все размеры W1 до начала любых измерений.
             for (int index = 0; index < BATCH_SIZES.length; index++) {
                 int size = BATCH_SIZES[index];
                 gatePerlin(perlinReference, perlinKernel, perlinState,
@@ -181,6 +188,7 @@ public final class ThreeWayBenchmark {
             }
 
             // Gate every W2 size before starting any measurements.
+            // Проверяем все размеры W2 до начала любых измерений.
             for (int index = 0; index < BATCH_SIZES.length; index++) {
                 int size = BATCH_SIZES[index];
                 gateArithmetic(arithmeticTree, arithmeticProgram.program,
@@ -255,6 +263,7 @@ public final class ThreeWayBenchmark {
 
     // ---------------------------------------------------------------------
     // W1: Minecraft Perlin reference and existing scalar test FFM bridge.
+    // W1: эталон Minecraft Perlin и существующий скалярный тестовый FFM-мост.
     // ---------------------------------------------------------------------
 
     private static final class ExportablePerlin extends PerlinNoise {
@@ -364,7 +373,7 @@ public final class ThreeWayBenchmark {
         return new Inputs(x, y, z);
     }
 
-    private static Inputs createArithmeticInputs(int size) {
+    static Inputs createArithmeticInputs(int size) {
         Random random = new Random(ARITHMETIC_INPUT_SEED ^ size);
 
         double[] x = new double[size];
@@ -450,6 +459,7 @@ public final class ThreeWayBenchmark {
 
     // ---------------------------------------------------------------------
     // W2: one arithmetic expression tree and three independent evaluators.
+    // W2: одно дерево арифметических выражений и три независимые реализации.
     // ---------------------------------------------------------------------
 
     private enum NodeKind {
@@ -672,6 +682,12 @@ public final class ThreeWayBenchmark {
         return binary(DIV, ai, al);
     }
 
+    // Reuse the exact workload in the direct-C experiment.
+    // Повторно используем ту же нагрузку в эксперименте с прямым C-кодом.
+    static ArithmeticProgram arithmeticBenchmarkProgram() {
+        return compileArithmeticProgram(buildArithmeticTree()).program();
+    }
+
     private record ProgramBundle(ArithmeticProgram program) {
     }
 
@@ -750,9 +766,11 @@ public final class ThreeWayBenchmark {
 
     /**
      * Explicit arithmetic batch evaluator.
+     * Прямое пакетное вычисление арифметического выражения.
      * No temporary objects or arrays are allocated in the point loop.
+     * В цикле по точкам не создаются временные объекты или массивы.
      */
-    private static void optimizedJavaBatch(Inputs inputs, double[] output) {
+    static void optimizedJavaBatch(Inputs inputs, double[] output) {
         for (int index = 0; index < inputs.size(); index++) {
             double x = inputs.x[index];
             double y = inputs.y[index];
@@ -809,9 +827,10 @@ public final class ThreeWayBenchmark {
 
     // ---------------------------------------------------------------------
     // Correctness-independent measurement infrastructure.
+    // Инфраструктура измерений, отделённая от проверок корректности.
     // ---------------------------------------------------------------------
 
-    private record Inputs(double[] x, double[] y, double[] z) {
+    record Inputs(double[] x, double[] y, double[] z) {
         int size() {
             return x.length;
         }
@@ -873,6 +892,7 @@ public final class ThreeWayBenchmark {
                 samples[contender].add((double) elapsed / size);
 
                 // Consume all results outside the timed interval.
+                // Учитываем все результаты за пределами измеряемого интервала.
                 checksums[contender] = Long.rotateLeft(
                         checksums[contender], 7)
                         ^ checksumActions[contender].checksum();
@@ -953,6 +973,7 @@ public final class ThreeWayBenchmark {
 
     // ---------------------------------------------------------------------
     // Reproducibility metadata and report output.
+    // Метаданные для воспроизводимости и сохранение отчёта.
     // ---------------------------------------------------------------------
 
     private static void appendMetadata(
@@ -1026,6 +1047,7 @@ public final class ThreeWayBenchmark {
                 }
             } catch (IOException ignored) {
                 // Fall back to the environment-provided processor identifier.
+                // При недоступности запроса используем идентификатор CPU из окружения.
             }
         }
 
@@ -1085,11 +1107,11 @@ public final class ThreeWayBenchmark {
                     String contents = Files.readString(compilerInfo);
 
                     compilerId = capture(contents,
-                            "set\\\\(CMAKE_C_COMPILER_ID \\"([^\\"]+)\\"\\\\)",
+                            "set[(]CMAKE_C_COMPILER_ID \"([^\"]+)\"[)]",
                             compilerId);
 
                     compilerVersion = capture(contents,
-                            "set\\\\(CMAKE_C_COMPILER_VERSION \\"([^\\"]+)\\"\\\\)",
+                            "set[(]CMAKE_C_COMPILER_VERSION \"([^\"]+)\"[)]",
                             compilerVersion);
                 }
             }
@@ -1135,4 +1157,4 @@ public final class ThreeWayBenchmark {
                 StandardOpenOption.CREATE_NEW,
                 StandardOpenOption.WRITE);
     }
-}</escape>
+}

@@ -94,7 +94,8 @@ sourceSets {
             srcDir 'benchmarks/interpreter'
             include 'PerlinMinecraftTest.java'
             include 'BlendedMinecraftTest.java'
-            include 'ThreeWayBenchmark.java'
+            include 'com/Evga314/cnoise/runtime/benchmark/ThreeWayBenchmark.java'
+            include 'com/Evga314/cnoise/runtime/benchmark/DirectArithmeticBenchmark.java'
         }
         compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
         runtimeClasspath += sourceSets.main.runtimeClasspath
@@ -106,7 +107,7 @@ tasks.register('cnoiseBenchmark', JavaExec) {
     description = 'Run the three-way Perlin and arithmetic benchmark / Запустить трёхсторонний benchmark Perlin и arithmetic.'
     dependsOn tasks.named('perlinTestClasses')
     classpath = sourceSets.perlinTest.runtimeClasspath
-    mainClass = 'ThreeWayBenchmark'
+    mainClass = 'com.Evga314.cnoise.runtime.benchmark.ThreeWayBenchmark'
     javaLauncher = javaToolchains.launcherFor {
         languageVersion = JavaLanguageVersion.of(targetJavaVersion)
     }
@@ -123,6 +124,36 @@ tasks.register('cnoiseBenchmark', JavaExec) {
                     'Pass -ParithmeticLibrary=<absolute path to cnoise DLL>')
         }
         setArgs([file(perlinLibraryPath).absolutePath, file(arithmeticLibraryPath).absolutePath])
+    }
+}
+
+// Isolated direct-C experiment; explicit library paths and a new report per JVM.
+// Отдельный эксперимент прямого C: явные пути DLL и новый отчёт для каждой JVM.
+tasks.register('cnoiseDirectBenchmark', JavaExec) {
+    group = 'verification'
+    description = 'Compare direct C with Java JIT / Сравнить прямой C и Java JIT'
+    dependsOn tasks.named('perlinTestClasses')
+    classpath = sourceSets.perlinTest.runtimeClasspath
+    mainClass = 'com.Evga314.cnoise.runtime.benchmark.DirectArithmeticBenchmark'
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    jvmArgs(['--enable-native-access=ALL-UNNAMED', '-Xms2g', '-Xmx2g'])
+    doFirst {
+        def directPath = providers.gradleProperty('directLibrary').orNull
+        def vmPath = providers.gradleProperty('arithmeticLibrary').orNull
+        def reportPath = providers.gradleProperty('directReport').orNull
+        if (directPath == null || !file(directPath).isFile()
+                || vmPath == null || !file(vmPath).isFile() || reportPath == null) {
+            throw new GradleException(
+                    'Supply -PdirectLibrary=<DLL> -ParithmeticLibrary=<DLL> -PdirectReport=<new report.md>')
+        }
+        def cpu = providers.gradleProperty('benchmarkCpu').orNull
+        if (cpu != null) {
+            systemProperty 'benchmark.cpu', cpu
+        }
+        setArgs([file(directPath).absolutePath, file(vmPath).absolutePath,
+                 file(reportPath).absolutePath])
     }
 }
 
